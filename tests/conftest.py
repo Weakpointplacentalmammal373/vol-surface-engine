@@ -61,7 +61,7 @@ def make_synthetic_chain(
     strikes = np.linspace(SPOT * 0.85, SPOT * 1.15, n_strikes)
 
     rows = []
-    for exp, dte in zip(expiries, dte_days, strict=True):
+    for exp, dte in zip(expiries, dte_days):
         T = dte / 365.25
         for K in strikes:
             for otype in ["call", "put"]:

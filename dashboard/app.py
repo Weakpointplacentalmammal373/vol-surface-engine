@@ -119,7 +119,7 @@ def _generate_placeholder() -> VolSurface:
     rng = np.random.default_rng(42)
     rows: list[dict] = []
 
-    for T, svi in zip(T_values, svi_configs, strict=True):
+    for T, svi in zip(T_values, svi_configs):
         F = spot * np.exp((r - q) * T)
         # Generate strikes around ATM
         moneyness_range = min(0.15 + T * 0.3, 0.45)
@@ -132,7 +132,7 @@ def _generate_placeholder() -> VolSurface:
         )
         iv_true = np.sqrt(np.maximum(w_true, 1e-8) / T)
 
-        for K, iv in zip(strikes, iv_true, strict=True):
+        for K, iv in zip(strikes, iv_true):
             # Add realistic noise (wider for short expiry)
             noise = rng.normal(0, 0.002 + 0.001 / np.sqrt(T))
             iv_noisy = max(iv + noise, 0.03)
