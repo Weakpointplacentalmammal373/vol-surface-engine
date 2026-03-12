@@ -35,6 +35,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from dashboard.components import (  # noqa: E402
     render_arbitrage_diagnostics,
+    render_delta_smile,
+    render_greeks,
+    render_local_vol,
     render_mispricing_table,
     render_residual_heatmap,
     render_smile_slices,
@@ -79,13 +82,26 @@ else:
     symbol = "SPY"
 
 st.sidebar.markdown("---")
+
+st.sidebar.markdown("### Pipeline")
+st.sidebar.markdown(
+    "1. **Data** — Options chain ingestion & cleaning\n"
+    "2. **IV Engine** — Newton-Raphson + Brent fallback\n"
+    "3. **SVI Fit** — Multi-start L-BFGS-B calibration\n"
+    "4. **Arbitrage** — Durrleman + calendar enforcement\n"
+    "5. **Greeks** — BS sensitivities from fitted surface\n"
+    "6. **Local Vol** — Dupire's formula"
+)
+
+st.sidebar.markdown("---")
 st.sidebar.markdown(
     "**Author:** Cameron Scarpati\n\n"
     "Vanderbilt CS + Applied Math"
 )
 st.sidebar.markdown(
     "[Gatheral (2004)](https://doi.org/10.1002/wilm.10201) · "
-    "[Durrleman (2005)](https://www.princeton.edu/~durrleman/)"
+    "[Durrleman (2005)](https://www.princeton.edu/~durrleman/) · "
+    "[Dupire (1994)](https://doi.org/10.3905/jod.1994.407887)"
 )
 
 
@@ -189,6 +205,17 @@ def _load_live(symbol: str) -> VolSurface:
 def main() -> None:
     st.title("Arbitrage-Free Volatility Surface Engine")
 
+    # Methodology overview
+    st.markdown(
+        "Constructs an arbitrage-free implied volatility surface by fitting the "
+        "**SVI parameterization** (Gatheral 2004) to market options data, enforcing "
+        "**no-butterfly arbitrage** via the Durrleman (2005) condition and "
+        "**no-calendar-spread arbitrage** via total-variance monotonicity. "
+        "The fitted surface is then used to derive **Black-Scholes Greeks** and "
+        "**Dupire local volatility** — the complete toolkit for derivatives pricing "
+        "and hedging."
+    )
+
     # Load data
     if data_source == "Live (yfinance)":
         try:
@@ -203,68 +230,104 @@ def main() -> None:
     chain = surface.chain
     sp = surface.slice_params
 
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
+    # ── Summary metrics ──────────────────────────────────────────────────
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Spot", f"${surface.spot:.2f}")
     col2.metric("Risk-Free Rate", f"{surface.risk_free:.2%}")
     col3.metric("Div Yield", f"{surface.div_yield:.3%}")
     col4.metric("Expiry Slices", f"{len(sp)}")
 
+    # Aggregate fit quality
+    if not sp.empty:
+        avg_r2 = sp["r_squared"].mean()
+        avg_rmse = sp["rmse"].mean()
+        col5.metric("Avg R²", f"{avg_r2:.6f}")
+        col6.metric("Avg RMSE", f"{avg_rmse:.2e}")
+
     st.markdown("---")
 
-    # Primary visualisations: 3D surface and smile slices side by side
-    left, right = st.columns([3, 2])
+    # ── Tab-based navigation for clean organization ──────────────────────
+    tab_surface, tab_smiles, tab_greeks, tab_localvol, tab_arb, tab_term = st.tabs([
+        "Volatility Surface",
+        "Smile Analysis",
+        "Greeks",
+        "Local Volatility",
+        "Arbitrage Diagnostics",
+        "Term Structure",
+    ])
 
-    with left:
+    # ── Tab 1: Volatility Surface ────────────────────────────────────────
+    with tab_surface:
+        left, right = st.columns([3, 2])
+        with left:
+            st.caption(
+                "**3-D Volatility Surface** — Implied volatility plotted against "
+                "strike (moneyness) and time to expiry. The surface is built by "
+                "fitting a Stochastic Volatility Inspired (SVI) model to each "
+                "expiry slice, then interpolating across tenors. A smooth, "
+                "well-behaved surface indicates consistent arbitrage-free pricing."
+            )
+            render_surface_3d(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+
+        with right:
+            st.caption(
+                "**Volatility Smile per Expiry** — Each curve shows the SVI fit "
+                "for a single expiry overlaid on market-observed IVs. The "
+                "characteristic 'smile' or 'skew' shape reflects how out-of-the-"
+                "money puts trade at higher implied vols than ATM options, driven "
+                "by demand for downside protection and the leverage effect."
+            )
+            render_smile_slices(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+
+        st.markdown("---")
+
         st.caption(
-            "**3-D Volatility Surface** — Implied volatility plotted against "
-            "strike (moneyness) and time to expiry. The surface is built by "
-            "fitting a Stochastic Volatility Inspired (SVI) model to each "
-            "expiry slice, then interpolating across tenors. A smooth, "
-            "well-behaved surface indicates consistent arbitrage-free pricing."
+            "**Residual Heatmap** — Difference between market-observed IV and "
+            "the SVI model fit, mapped across strike and expiry. Large residuals "
+            "highlight options where the model deviates from the market — "
+            "potential mispricings or areas where the SVI parameterization "
+            "struggles (e.g. deep OTM wings, illiquid strikes)."
         )
-        render_surface_3d(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+        render_residual_heatmap(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
 
-    with right:
+    # ── Tab 2: Smile Analysis (delta-space + mispricing) ─────────────────
+    with tab_smiles:
+        left2, right2 = st.columns([3, 2])
+        with left2:
+            render_delta_smile(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+        with right2:
+            st.caption(
+                "**Mispricing Table** — Options with the largest absolute "
+                "residuals between market IV and the SVI fit. These are "
+                "candidates where the market price diverges most from the "
+                "arbitrage-free model, potentially indicating trading "
+                "opportunities or data quality issues."
+            )
+            render_mispricing_table(
+                chain, sp, surface.spot, surface.risk_free, surface.div_yield,
+            )
+
+    # ── Tab 3: Greeks ────────────────────────────────────────────────────
+    with tab_greeks:
+        render_greeks(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+
+    # ── Tab 4: Local Volatility ──────────────────────────────────────────
+    with tab_localvol:
+        render_local_vol(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+
+    # ── Tab 5: Arbitrage Diagnostics ─────────────────────────────────────
+    with tab_arb:
         st.caption(
-            "**Volatility Smile per Expiry** — Each curve shows the SVI fit "
-            "for a single expiry overlaid on market-observed IVs. The "
-            "characteristic 'smile' or 'skew' shape reflects how out-of-the-"
-            "money puts trade at higher implied vols than ATM options, driven "
-            "by demand for downside protection and the leverage effect."
+            "**Arbitrage Diagnostics** — Static no-arbitrage conditions verified "
+            "across the surface. *Butterfly arbitrage* is checked via the "
+            "Durrleman (2005) condition, which requires the risk-neutral density "
+            "to be non-negative at every strike. *Calendar-spread arbitrage* "
+            "ensures total variance is non-decreasing in time to expiry."
         )
-        render_smile_slices(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
+        render_arbitrage_diagnostics(sp, surface.diagnostics)
 
-    st.markdown("---")
-
-    # Residual heatmap
-    st.caption(
-        "**Residual Heatmap** — Difference between market-observed IV and "
-        "the SVI model fit, mapped across strike and expiry. Large residuals "
-        "highlight options where the model deviates from the market — "
-        "potential mispricings or areas where the SVI parameterization "
-        "struggles (e.g. deep OTM wings, illiquid strikes)."
-    )
-    render_residual_heatmap(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
-
-    st.markdown("---")
-
-    # Arbitrage diagnostics
-    st.caption(
-        "**Arbitrage Diagnostics** — Static no-arbitrage conditions verified "
-        "across the surface. *Butterfly arbitrage* is checked via the "
-        "Durrleman (2005) condition, which requires the risk-neutral density "
-        "to be non-negative at every strike. *Calendar-spread arbitrage* "
-        "ensures total variance is non-decreasing in time to expiry."
-    )
-    render_arbitrage_diagnostics(sp, surface.diagnostics)
-
-    st.markdown("---")
-
-    # Term structure & mispricing table
-    left2, right2 = st.columns([1, 1])
-
-    with left2:
+    # ── Tab 6: Term Structure ────────────────────────────────────────────
+    with tab_term:
         st.caption(
             "**ATM Term Structure** — At-the-money implied volatility as a "
             "function of time to expiry. An upward-sloping curve is typical "
@@ -272,18 +335,6 @@ def main() -> None:
             "signals near-term event risk or elevated short-dated demand."
         )
         render_term_structure(chain, sp)
-
-    with right2:
-        st.caption(
-            "**Mispricing Table** — Options with the largest absolute "
-            "residuals between market IV and the SVI fit. These are "
-            "candidates where the market price diverges most from the "
-            "arbitrage-free model, potentially indicating trading "
-            "opportunities or data quality issues."
-        )
-        render_mispricing_table(
-            chain, sp, surface.spot, surface.risk_free, surface.div_yield,
-        )
 
 
 if __name__ == "__main__":

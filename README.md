@@ -35,7 +35,7 @@ An implied volatility surface construction tool that pulls live SPY options data
 └───────────────┴──────────────┴──────────────┴─────────────────────┘
 ```
 
-**Pipeline flow:** `yfinance` → clean chain → Newton-Raphson IV → SVI calibration → Durrleman enforcement → interactive dashboard
+**Pipeline flow:** `yfinance` → clean chain → Newton-Raphson IV → SVI calibration → Durrleman enforcement → Greeks & local vol → interactive dashboard
 
 ---
 
@@ -44,6 +44,8 @@ An implied volatility surface construction tool that pulls live SPY options data
 1. **SVI fits SPY smiles with < 0.5 vol point RMSE** across all expiry slices, while enforcing no-butterfly and no-calendar-spread arbitrage via Durrleman conditions.
 2. **ATM skew steepens 2-3x for near-term expiries** vs. long-dated, consistent with leverage effect and jump risk concentration in the short-term volatility surface.
 3. **Residual analysis identifies 15-20 options per snapshot** with statistically significant mispricings (|residual| > 2σ), concentrated in weekly expiries with wide bid-ask spreads.
+4. **Dupire local volatility** derived from the SVI surface reveals the instantaneous volatility structure implied by the market, with pronounced skew compression at longer maturities.
+5. **Delta-space analysis** (25Δ risk-reversals and butterflies) quantifies skew and convexity in the practitioner-standard convention used on derivatives desks.
 
 ---
 
@@ -78,6 +80,18 @@ $$g(k) = \left(1 - \frac{k w'}{2w}\right)^2 - \frac{(w')^2}{4}\left(\frac{1}{w} 
 **Calendar-spread arbitrage** — total variance must be non-decreasing in time: $\partial w / \partial T \geq 0$.
 
 When violations are detected, parameters are re-fit with a progressive penalty method that escalates $\lambda$ until $g(k) \geq 0$ everywhere.
+
+### Local Volatility (Dupire)
+
+The fitted SVI surface is used to extract Dupire (1994) local volatility — the unique diffusion coefficient consistent with observed European option prices:
+
+$$\sigma_{\text{loc}}^2(K,T) = \frac{\partial w / \partial T}{1 - \frac{k w'}{w} + \frac{w''}{2} - \frac{(w')^2}{4}\left(\frac{1}{w} + \frac{1}{4}\right)}$$
+
+where the numerator uses finite differences across SVI slices and the denominator uses analytical SVI derivatives. This bridges implied volatility (a quoting convention) to the risk-neutral dynamics.
+
+### Greeks & Delta-Space Analysis
+
+Black-Scholes Greeks ($\Delta$, $\Gamma$, $\nu$, $\Theta$) are computed from the fitted IV surface across the full (strike, T) grid, providing the sensitivity profile that drives hedging and risk management. The dashboard includes delta-space smile views with standard quoting conventions (25Δ risk-reversals and butterflies) used on derivatives trading desks.
 
 ---
 
@@ -151,6 +165,9 @@ vol-surface-engine/
 │       ├── helpers.py             # Shared computation helpers
 │       ├── surface_3d.py          # 3D volatility surface (Plotly)
 │       ├── smile_slice.py         # Per-expiry smile with bid-ask bands
+│       ├── delta_smile.py         # Delta-space smile (25Δ RR/BF metrics)
+│       ├── greeks.py              # Greeks surface (Δ, Γ, ν, Θ)
+│       ├── local_vol.py           # Local volatility via Dupire's formula
 │       ├── residual_heatmap.py    # Strike × expiry mispricing heatmap
 │       ├── arbitrage_diag.py      # Durrleman g(k) + calendar diagnostics
 │       └── term_structure.py      # ATM term structure + mispricing table
@@ -179,3 +196,4 @@ vol-surface-engine/
 3. Durrleman, V. (2005). *From Implied to Spot Volatilities.* PhD Thesis, Princeton University.
 4. Black, F. & Scholes, M. (1973). *The Pricing of Options and Corporate Liabilities.* Journal of Political Economy.
 5. Brenner, M. & Subrahmanyam, M.G. (1988). *A Simple Formula to Compute the Implied Standard Deviation.* Financial Analysts Journal.
+6. Dupire, B. (1994). *Pricing with a Smile.* Risk Magazine, 7(1), 18–20.

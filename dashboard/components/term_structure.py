@@ -122,7 +122,7 @@ def render_mispricing_table(
     div_yield: float,
     top_n: int = 10,
 ) -> None:
-    """Top N mispricings ranked by |residual|."""
+    """Top N mispricings ranked by |residual|, with delta and moneyness."""
     st.subheader(f"Top {top_n} Mispricings")
 
     df = compute_chain_fitted_iv(chain, slice_params)
@@ -134,16 +134,33 @@ def render_mispricing_table(
     df["DTE"] = (df["T"] * 365.25).round().astype(int)
     df["bid_ask_spread"] = df["ask"] - df["bid"]
 
+    # Add log-moneyness and BS delta for hedging context
+    df["F"] = df["S"] * np.exp((df["r"] - df["q"]) * df["T"])
+    df["moneyness"] = np.log(df["strike"] / df["F"])
+
+    from scipy.stats import norm as _norm
+
+    sqrt_T = np.sqrt(df["T"])
+    d1 = (np.log(df["S"] / df["strike"]) + (df["r"] - df["q"] + 0.5 * df["iv"]**2) * df["T"]) / (df["iv"] * sqrt_T)
+    call_delta = np.exp(-df["q"] * df["T"]) * _norm.cdf(d1)
+    df["delta"] = np.where(
+        df["option_type"] == "call",
+        call_delta,
+        call_delta - np.exp(-df["q"] * df["T"]),
+    )
+
     top = (
         df.dropna(subset=["residual"])
         .nlargest(top_n, "abs_residual")
-        [["strike", "DTE", "option_type", "iv", "fitted_iv", "residual",
-          "direction", "bid", "ask", "bid_ask_spread"]]
+        [["strike", "DTE", "option_type", "delta", "moneyness", "iv", "fitted_iv",
+          "residual", "direction", "bid", "ask", "bid_ask_spread"]]
         .reset_index(drop=True)
     )
 
     # Format for display
     fmt = {
+        "delta": "{:.3f}",
+        "moneyness": "{:+.3f}",
         "iv": "{:.4f}",
         "fitted_iv": "{:.4f}",
         "residual": "{:+.4f}",
@@ -163,5 +180,6 @@ def render_mispricing_table(
     n_sig = (df["abs_residual"] > 2 * sigma_r).sum()
     st.caption(
         f"Residual σ = {sigma_r:.4f} | "
-        f"{n_sig} options exceed 2σ significance threshold"
+        f"{n_sig} options exceed 2σ significance threshold | "
+        f"Delta and log-moneyness ln(K/F) included for hedging context"
     )
