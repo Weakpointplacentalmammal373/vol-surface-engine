@@ -124,8 +124,10 @@ def _generate_placeholder() -> VolSurface:
 
     rng = np.random.default_rng(42)
     rows: list[dict] = []
+    now = pd.Timestamp.now().normalize()  # midnight today, consistent per expiry
 
     for T, svi in zip(T_values, svi_configs, strict=True):
+        expiry_date = now + pd.Timedelta(days=int(T * 365.25))
         F = spot * np.exp((r - q) * T)
         # Generate strikes around ATM
         moneyness_range = min(0.15 + T * 0.3, 0.45)
@@ -150,7 +152,7 @@ def _generate_placeholder() -> VolSurface:
                 ask = price + spread / 2
 
                 rows.append({
-                    "expiry": pd.Timestamp.now() + pd.Timedelta(days=T * 365.25),
+                    "expiry": expiry_date,
                     "strike": K,
                     "option_type": otype,
                     "mid_price": price,
