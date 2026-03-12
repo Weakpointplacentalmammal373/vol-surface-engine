@@ -62,7 +62,7 @@ def main() -> None:
     strikes = np.linspace(SPOT * 0.80, SPOT * 1.20, n_strikes)
 
     rows = []
-    for exp, dte in zip(expiries, dte_days):
+    for exp, dte in zip(expiries, dte_days, strict=True):
         T = dte / 365.25
         for K in strikes:
             for otype in ["call", "put"]:

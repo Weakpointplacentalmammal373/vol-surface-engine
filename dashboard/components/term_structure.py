@@ -95,7 +95,7 @@ def render_term_structure(
     )
 
     positions = [(1, 1), (1, 2), (2, 1), (2, 2), (3, 1)]
-    for (col_name, label), (r, c) in zip(param_names, positions):
+    for (col_name, label), (r, c) in zip(param_names, positions, strict=True):
         fig2.add_trace(
             go.Scatter(
                 x=dte,
