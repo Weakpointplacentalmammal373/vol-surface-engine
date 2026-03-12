@@ -7,8 +7,6 @@
 
 An implied volatility surface construction tool that pulls live SPY options data, extracts IV via Newton-Raphson, fits the SVI parameterization (Gatheral 2004), enforces no-arbitrage constraints via Durrleman conditions, and renders everything in an interactive Streamlit dashboard.
 
-Built as a companion to [LOB Regime Scanner](https://github.com/CameronScarpati) — bridging microstructure analysis into derivatives pricing.
-
 **Author:** Cameron Scarpati — Vanderbilt CS + Applied Math
 
 ---
