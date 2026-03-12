@@ -17,6 +17,12 @@ import logging
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 10):  # noqa: UP036 — intentional guard for clear error message
+    raise RuntimeError(
+        f"Python ≥ 3.10 is required (running {sys.version}). "
+        "Please recreate your virtualenv with Python 3.10+."
+    )
+
 import numpy as np
 import pandas as pd
 import streamlit as st
