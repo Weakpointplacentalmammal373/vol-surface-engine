@@ -81,8 +81,7 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "**Author:** Cameron Scarpati\n\n"
-    "Vanderbilt CS + Applied Math\n\n"
-    "Morgan Stanley Equity Algorithms"
+    "Vanderbilt CS + Applied Math"
 )
 st.sidebar.markdown(
     "[Gatheral (2004)](https://doi.org/10.1002/wilm.10201) · "
@@ -124,8 +123,10 @@ def _generate_placeholder() -> VolSurface:
 
     rng = np.random.default_rng(42)
     rows: list[dict] = []
+    now = pd.Timestamp.now().normalize()  # midnight today, consistent per expiry
 
     for T, svi in zip(T_values, svi_configs, strict=True):
+        expiry_date = now + pd.Timedelta(days=int(T * 365.25))
         F = spot * np.exp((r - q) * T)
         # Generate strikes around ATM
         moneyness_range = min(0.15 + T * 0.3, 0.45)
@@ -150,7 +151,7 @@ def _generate_placeholder() -> VolSurface:
                 ask = price + spread / 2
 
                 rows.append({
-                    "expiry": pd.Timestamp.now() + pd.Timedelta(days=T * 365.25),
+                    "expiry": expiry_date,
                     "strike": K,
                     "option_type": otype,
                     "mid_price": price,
@@ -215,19 +216,47 @@ def main() -> None:
     left, right = st.columns([3, 2])
 
     with left:
+        st.caption(
+            "**3-D Volatility Surface** — Implied volatility plotted against "
+            "strike (moneyness) and time to expiry. The surface is built by "
+            "fitting a Stochastic Volatility Inspired (SVI) model to each "
+            "expiry slice, then interpolating across tenors. A smooth, "
+            "well-behaved surface indicates consistent arbitrage-free pricing."
+        )
         render_surface_3d(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
 
     with right:
+        st.caption(
+            "**Volatility Smile per Expiry** — Each curve shows the SVI fit "
+            "for a single expiry overlaid on market-observed IVs. The "
+            "characteristic 'smile' or 'skew' shape reflects how out-of-the-"
+            "money puts trade at higher implied vols than ATM options, driven "
+            "by demand for downside protection and the leverage effect."
+        )
         render_smile_slices(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
 
     st.markdown("---")
 
     # Residual heatmap
+    st.caption(
+        "**Residual Heatmap** — Difference between market-observed IV and "
+        "the SVI model fit, mapped across strike and expiry. Large residuals "
+        "highlight options where the model deviates from the market — "
+        "potential mispricings or areas where the SVI parameterization "
+        "struggles (e.g. deep OTM wings, illiquid strikes)."
+    )
     render_residual_heatmap(chain, sp, surface.spot, surface.risk_free, surface.div_yield)
 
     st.markdown("---")
 
     # Arbitrage diagnostics
+    st.caption(
+        "**Arbitrage Diagnostics** — Static no-arbitrage conditions verified "
+        "across the surface. *Butterfly arbitrage* is checked via the "
+        "Durrleman (2005) condition, which requires the risk-neutral density "
+        "to be non-negative at every strike. *Calendar-spread arbitrage* "
+        "ensures total variance is non-decreasing in time to expiry."
+    )
     render_arbitrage_diagnostics(sp, surface.diagnostics)
 
     st.markdown("---")
@@ -236,9 +265,22 @@ def main() -> None:
     left2, right2 = st.columns([1, 1])
 
     with left2:
+        st.caption(
+            "**ATM Term Structure** — At-the-money implied volatility as a "
+            "function of time to expiry. An upward-sloping curve is typical "
+            "in calm markets (mean-reversion expectation), while inversion "
+            "signals near-term event risk or elevated short-dated demand."
+        )
         render_term_structure(chain, sp)
 
     with right2:
+        st.caption(
+            "**Mispricing Table** — Options with the largest absolute "
+            "residuals between market IV and the SVI fit. These are "
+            "candidates where the market price diverges most from the "
+            "arbitrage-free model, potentially indicating trading "
+            "opportunities or data quality issues."
+        )
         render_mispricing_table(
             chain, sp, surface.spot, surface.risk_free, surface.div_yield,
         )
