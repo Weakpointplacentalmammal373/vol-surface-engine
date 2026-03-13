@@ -60,8 +60,8 @@ def _build_surface_grid(
         k = np.log(strikes / F)
         w = svi_total_variance(k, sp["a"], sp["b"], sp["rho"], sp["m"], sp["sigma"])
         iv_vals = np.sqrt(np.maximum(w, 0.0) / T)
-        # Cap extreme wing IVs that are fitting artifacts.
-        iv_vals = np.where(iv_vals > 1.5, np.nan, iv_vals)
+        # Cap extreme wing IVs that are SVI extrapolation artifacts.
+        iv_vals = np.where(iv_vals > 0.80, np.nan, iv_vals)
         fitted_iv_grid[i, :] = iv_vals
 
         # Scatter market points onto nearest grid columns
@@ -111,6 +111,21 @@ def render_surface_3d(
         colorscale = "RdBu_r"
         cbar_title = "Residual"
 
+    # Compute z-axis bounds from the data to prevent outliers from
+    # distorting the surface.
+    z_flat = z[np.isfinite(z)]
+    if len(z_flat) > 0:
+        if "Residual" in view_mode:
+            abs_max = max(float(np.percentile(np.abs(z_flat), 95)), 0.005)
+            z_range = [-abs_max, abs_max]
+        else:
+            z_lo = max(float(np.percentile(z_flat, 2)), 0.0)
+            z_hi = min(float(np.percentile(z_flat, 98)) * 1.2, 0.80)
+            z_hi = max(z_hi, 0.10)
+            z_range = [z_lo, z_hi]
+    else:
+        z_range = [0, 0.50]
+
     fig = go.Figure(
         data=[
             go.Surface(
@@ -119,6 +134,8 @@ def render_surface_3d(
                 z=z,
                 colorscale=colorscale,
                 colorbar=dict(title=cbar_title, tickformat=".3f"),
+                cmin=z_range[0],
+                cmax=z_range[1],
                 hovertemplate=(
                     "Strike: %{x:.1f}<br>"
                     "DTE: %{y:.0f} days<br>"
@@ -133,6 +150,7 @@ def render_surface_3d(
             xaxis_title="Strike",
             yaxis_title="Days to Expiry",
             zaxis_title="Implied Volatility" if "Residual" not in view_mode else "Residual",
+            zaxis=dict(range=z_range),
             camera=dict(eye=dict(x=1.5, y=-1.8, z=0.8)),
         ),
         margin=dict(l=0, r=0, t=30, b=0),

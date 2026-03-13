@@ -120,15 +120,63 @@ def build_surface(
     n_valid = chain_iv["iv"].notna().sum()
     logger.info("IV extraction complete: %d / %d valid", n_valid, len(chain_iv))
 
-    # Step 1b: discard implausible IVs that would poison the SVI fit.
-    # Deep OTM options with wide spreads can produce extreme IVs (200%+)
-    # from the Newton-Raphson solver; these are fitting artifacts, not
-    # genuine market signal.
-    implausible = chain_iv["iv"].notna() & (chain_iv["iv"] > 1.5)
-    n_implausible = implausible.sum()
-    if n_implausible > 0:
-        chain_iv.loc[implausible, "iv"] = np.nan
-        logger.info("Discarded %d implausible IVs (> 150%%)", n_implausible)
+    # Step 1b: discard IVs that would poison the SVI fit.
+    #
+    # Three filters applied in sequence:
+    # (a) Far-from-ATM options (|log-moneyness| > 0.30) produce unreliable
+    #     IVs — deep ITM prices are dominated by intrinsic value, and far
+    #     OTM prices are near-zero with wide bid-ask spreads.
+    # (b) Absolute IV cap — IVs above 80% on equity options are almost
+    #     always noise from illiquid deep ITM quotes.
+    # (c) Per-slice outlier removal — within each expiry, remove IVs that
+    #     deviate more than 3× the median absolute deviation from the
+    #     slice median.  This catches stale quotes and data errors that
+    #     pass the above filters.
+    has_iv = chain_iv["iv"].notna()
+    F = chain_iv["S"] * np.exp((chain_iv["r"] - chain_iv["q"]) * chain_iv["T"])
+    k = np.log(chain_iv["strike"] / F)
+
+    # (a) Moneyness filter: discard far OTM (|k| > 0.30) and deep ITM.
+    #     For calls, allow k in [-0.15, 0.30]; for puts, k in [-0.30, 0.15].
+    #     Deep ITM options have prices dominated by intrinsic value, making
+    #     IV extraction unreliable.
+    is_call = chain_iv["option_type"] == "call"
+    too_far = has_iv & (
+        (is_call & ((k < -0.15) | (k > 0.30)))
+        | (~is_call & ((k > 0.15) | (k < -0.30)))
+    )
+    n_far = too_far.sum()
+    if n_far > 0:
+        chain_iv.loc[too_far, "iv"] = np.nan
+        logger.info("Discarded %d far-from-ATM / deep-ITM IVs", n_far)
+
+    # (b) Per-slice outlier removal using median absolute deviation.
+    #     Within each expiry, remove IVs that deviate more than 3× MAD
+    #     from the slice median, and also cap at 3× the slice median
+    #     to catch extreme values in slices with too few points for
+    #     robust MAD.
+    n_outlier = 0
+    for T_val in chain_iv["T"].unique():
+        mask = (chain_iv["T"] == T_val) & chain_iv["iv"].notna()
+        if mask.sum() < 3:
+            continue
+        iv_slice = chain_iv.loc[mask, "iv"]
+        med = iv_slice.median()
+        mad = (iv_slice - med).abs().median()
+        if mad < 0.005:
+            mad = 0.005  # floor to avoid rejecting everything
+
+        # Remove IVs too far from the slice median.
+        outlier = mask & (
+            ((chain_iv["iv"] - med).abs() > 3.0 * mad)
+            | (chain_iv["iv"] > max(3.0 * med, 1.5))
+        )
+        n_out = outlier.sum()
+        if n_out > 0:
+            chain_iv.loc[outlier, "iv"] = np.nan
+            n_outlier += n_out
+    if n_outlier > 0:
+        logger.info("Discarded %d per-slice outlier IVs", n_outlier)
 
     # Step 2: fit SVI per slice
     slice_params = fit_all_slices(chain_iv)
