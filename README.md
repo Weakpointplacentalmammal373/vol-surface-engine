@@ -16,23 +16,23 @@ An implied volatility surface construction tool that pulls live SPY options data
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │                    VOL SURFACE ENGINE                              │
-├───────────────┬──────────────┬──────────────┬─────────────────────┤
-│  Data Layer   │  IV Engine   │  SVI Fitter  │  Dashboard          │
-│               │              │              │                     │
-│  yfinance     │  Black-      │  5-param SVI │  3D surface (Plotly)│
-│  options      │  Scholes     │  calibration │                     │
-│  chains       │  closed-form │              │  Smile per expiry   │
-│               │              │  Durrleman   │  with bid-ask bands │
-│  FRED / T-bill│  Newton-     │  butterfly   │                     │
-│  risk-free    │  Raphson +   │  constraint  │  Residual heatmap   │
-│  rate         │  Brent       │              │                     │
+├───────────────┬──────────────┬──────────────┬──────────────────────┤
+│  Data Layer   │  IV Engine   │  SVI Fitter  │  Dashboard           │
+│               │              │              │                      │
+│  yfinance     │  Black-      │  5-param SVI │  3D surface (Plotly) │
+│  options      │  Scholes     │  calibration │                      │
+│  chains       │  closed-form │              │  Smile per expiry    │
+│               │              │  Durrleman   │  with bid-ask bands  │
+│  FRED / T-bill│  Newton-     │  butterfly   │                      │
+│  risk-free    │  Raphson +   │  constraint  │  Residual heatmap    │
+│  rate         │  Brent       │              │                      │
 │               │  fallback    │  Calendar    │  Arbitrage           │
-│  Dividend     │              │  spread      │  diagnostics        │
-│  yield est.   │  Brenner-Sub │  monotonicity│                     │
-│               │  initial     │              │  Term structure     │
-│               │  guess       │  Multi-start │  + mispricing table │
-│               │              │  L-BFGS-B    │                     │
-└───────────────┴──────────────┴──────────────┴─────────────────────┘
+│  Dividend     │              │  spread      │  diagnostics         │
+│  yield est.   │  Brenner-Sub │  monotonicity│                      │
+│               │  initial     │              │  Term structure      │
+│               │  guess       │  Multi-start │  + mispricing table  │
+│               │              │  L-BFGS-B    │                      │
+└───────────────┴──────────────┴──────────────┴──────────────────────┘
 ```
 
 **Pipeline flow:** `yfinance` → clean chain → Newton-Raphson IV → SVI calibration → Durrleman enforcement → Greeks & local vol → interactive dashboard
