@@ -86,7 +86,7 @@ def bs_vega(
     q: float,
     sigma: float,
 ) -> float:
-    """Black-Scholes vega: ∂C/∂σ = S·e^{-qT}·√T·n(d1).
+    """Black-Scholes vega: dC/dsigma = S·e^{-qT}·sqrt(T)·n(d1).
 
     Vega is the same for calls and puts.
     """
@@ -103,7 +103,7 @@ def bs_vega(
 # Initial guess (Brenner-Subrahmanyam approximation)
 # ---------------------------------------------------------------------------
 def _initial_guess(market_price: float, S: float, T: float) -> float:
-    """Brenner-Subrahmanyam (1988): σ₀ ≈ √(2π/T) · C/S."""
+    """Brenner-Subrahmanyam (1988): sigma_0 ~ sqrt(2*pi/T) * C/S."""
     guess = np.sqrt(2.0 * np.pi / T) * market_price / S
     # Clamp to sensible range
     return float(np.clip(guess, 0.05, 3.0))
@@ -137,7 +137,7 @@ def _newton_raphson(
 
         vega = bs_vega(S, K, T, r, q, sigma)
         if vega < 1e-12:
-            # Near-zero vega → NR step is unreliable
+            # Near-zero vega -> NR step is unreliable
             return None
 
         sigma_new = sigma - diff / vega
@@ -172,7 +172,7 @@ def _brent_fallback(
         f_lo = objective(IV_LOWER)
         f_hi = objective(IV_UPPER)
         if f_lo * f_hi > 0:
-            # No sign change → no root in interval
+            # No sign change -> no root in interval
             return None
         iv = brentq(objective, IV_LOWER, IV_UPPER, xtol=IV_TOL_VOL, maxiter=IV_MAX_ITER)
         return float(iv)
@@ -204,7 +204,9 @@ def implied_volatility(
     if market_price <= 0 or T <= 0 or S <= 0 or K <= 0:
         return np.nan
 
-    # Intrinsic value floor check
+    # Intrinsic value floor check.
+    # BS price at any sigma > 0 is >= intrinsic, so if market_price is
+    # below intrinsic there is no valid IV in the BS framework.
     intrinsic = _intrinsic(S, K, T, r, q, option_type)
     if market_price < intrinsic - 1e-8:
         return np.nan

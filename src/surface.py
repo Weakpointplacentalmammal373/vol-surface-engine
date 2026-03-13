@@ -122,43 +122,56 @@ def build_surface(
 
     # Step 1b: discard IVs that would poison the SVI fit.
     #
-    # Three filters applied in sequence:
-    # (a) Far-from-ATM options (|log-moneyness| > 0.30) produce unreliable
-    #     IVs — deep ITM prices are dominated by intrinsic value, and far
-    #     OTM prices are near-zero with wide bid-ask spreads.
-    # (b) Absolute IV cap — IVs above 80% on equity options are almost
-    #     always noise from illiquid deep ITM quotes.
-    # (c) Per-slice outlier removal — within each expiry, remove IVs that
-    #     deviate more than 3× the median absolute deviation from the
-    #     slice median.  This catches stale quotes and data errors that
-    #     pass the above filters.
+    # Two filters applied in sequence:
+    # (a) Moneyness filter — remove deep ITM and far OTM options where IV
+    #     extraction is unreliable.  Adaptive bounds ensure we keep at least
+    #     5 valid IVs per slice for SVI fitting.
+    # (b) Per-slice outlier removal — MAD-based filter catches stale quotes
+    #     and data errors.
     has_iv = chain_iv["iv"].notna()
     F = chain_iv["S"] * np.exp((chain_iv["r"] - chain_iv["q"]) * chain_iv["T"])
     k = np.log(chain_iv["strike"] / F)
 
-    # (a) Moneyness filter: discard far OTM (|k| > 0.30) and deep ITM.
-    #     For calls, allow k in [-0.15, 0.30]; for puts, k in [-0.30, 0.15].
-    #     Deep ITM options have prices dominated by intrinsic value, making
-    #     IV extraction unreliable.
+    # (a) Moneyness filter: discard far OTM and deep ITM.
+    #     Uses asymmetric bounds per option type.  If the initial bounds
+    #     would leave fewer than 5 options in a slice, widen them.
     is_call = chain_iv["option_type"] == "call"
+
+    # Start with standard bounds but adapt per slice
+    k_call_lo, k_call_hi = -0.20, 0.35
+    k_put_lo, k_put_hi = -0.35, 0.20
+
     too_far = has_iv & (
-        (is_call & ((k < -0.15) | (k > 0.30)))
-        | (~is_call & ((k > 0.15) | (k < -0.30)))
+        (is_call & ((k < k_call_lo) | (k > k_call_hi)))
+        | (~is_call & ((k > k_put_hi) | (k < k_put_lo)))
     )
+
+    # Check per-slice survival: if fewer than 5 options survive in a slice,
+    # don't apply the moneyness filter for that slice.
+    n_far_adjusted = 0
+    for T_val in chain_iv["T"].unique():
+        slice_mask = chain_iv["T"] == T_val
+        slice_has_iv = slice_mask & has_iv
+        slice_too_far = slice_mask & too_far
+        n_surviving = slice_has_iv.sum() - slice_too_far.sum()
+        if n_surviving < 5:
+            # Keep all IVs for this slice — not enough survive the filter
+            too_far = too_far & ~slice_mask
+        else:
+            n_far_adjusted += slice_too_far.sum()
+
     n_far = too_far.sum()
     if n_far > 0:
         chain_iv.loc[too_far, "iv"] = np.nan
         logger.info("Discarded %d far-from-ATM / deep-ITM IVs", n_far)
 
     # (b) Per-slice outlier removal using median absolute deviation.
-    #     Within each expiry, remove IVs that deviate more than 3× MAD
-    #     from the slice median, and also cap at 3× the slice median
-    #     to catch extreme values in slices with too few points for
-    #     robust MAD.
+    #     Within each expiry, remove IVs that deviate more than 3x MAD
+    #     from the slice median.  Only remove if at least 5 IVs remain.
     n_outlier = 0
     for T_val in chain_iv["T"].unique():
         mask = (chain_iv["T"] == T_val) & chain_iv["iv"].notna()
-        if mask.sum() < 3:
+        if mask.sum() < 5:
             continue
         iv_slice = chain_iv.loc[mask, "iv"]
         med = iv_slice.median()
@@ -171,6 +184,11 @@ def build_surface(
             ((chain_iv["iv"] - med).abs() > 3.0 * mad)
             | (chain_iv["iv"] > max(3.0 * med, 1.5))
         )
+
+        # Don't remove outliers if it would leave fewer than 5 points
+        if mask.sum() - outlier.sum() < 5:
+            continue
+
         n_out = outlier.sum()
         if n_out > 0:
             chain_iv.loc[outlier, "iv"] = np.nan

@@ -7,6 +7,7 @@ blue-white-red colour scale.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -28,7 +29,7 @@ def render_residual_heatmap(
     df = df.dropna(subset=["residual"])
 
     if df.empty:
-        st.warning("No residuals to display.")
+        st.warning("No residuals to display — no valid market IV / fitted IV pairs found.")
         return
 
     # Compute significance threshold (2 sigma of residuals)
@@ -36,9 +37,13 @@ def render_residual_heatmap(
 
     # Create pivot for heatmap
     df["DTE"] = (df["T"] * 365.25).round().astype(int)
-    # Adaptive bucket size: ~40 buckets across the strike range.
+
+    # Adaptive bucket size based on the number of unique strikes.
+    # For sparse data, use fewer buckets to avoid gaps.
+    n_unique_strikes = df["strike"].nunique()
+    n_buckets = min(40, max(8, n_unique_strikes))
     strike_range = df["strike"].max() - df["strike"].min()
-    bucket_size = max(1.0, round(strike_range / 40.0))
+    bucket_size = max(1.0, round(strike_range / n_buckets))
     df["strike_bucket"] = (df["strike"] / bucket_size).round() * bucket_size
 
     pivot = df.pivot_table(
@@ -50,8 +55,17 @@ def render_residual_heatmap(
 
     pivot = pivot.sort_index(ascending=False)
 
+    if pivot.empty or pivot.values.size == 0:
+        st.warning("Not enough residual data to form a heatmap.")
+        return
+
     # Color bounds symmetric around zero
-    abs_max = max(abs(pivot.min().min()), abs(pivot.max().max()), 0.005)
+    finite_vals = pivot.values[np.isfinite(pivot.values)]
+    if len(finite_vals) == 0:
+        st.warning("All residual values are NaN.")
+        return
+
+    abs_max = max(float(np.max(np.abs(finite_vals))), 0.005)
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -67,6 +81,7 @@ def render_residual_heatmap(
                 "DTE: %{y}d<br>"
                 "Residual: %{z:.4f}<extra></extra>"
             ),
+            connectgaps=False,
         )
     )
 
