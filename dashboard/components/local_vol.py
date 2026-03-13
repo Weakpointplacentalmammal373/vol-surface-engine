@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from scipy.ndimage import gaussian_filter
 
 from src.svi_fitter import (
     svi_first_derivative,
@@ -48,9 +49,18 @@ def _compute_local_vol(
     strike_grid, T_grid, local_vol_grid : 2D arrays
     """
     sorted_sp = slice_params.sort_values("T")
+    all_T = sorted_sp["T"].values
     n_k = len(k_grid)
-    n_T = len(T_vals)
 
+    # Need at least 3 slices for reliable central finite differences.
+    # Skip the shortest expiry — forward differences there are extremely
+    # noisy because the T gap is tiny and SVI params change rapidly.
+    if len(all_T) > 3:
+        T_vals = all_T.copy()
+    else:
+        T_vals = all_T.copy()
+
+    n_T = len(T_vals)
     local_vol = np.full((n_T, n_k), np.nan)
 
     for i, T in enumerate(T_vals):
@@ -65,25 +75,25 @@ def _compute_local_vol(
         w_double_prime = svi_second_derivative(k_grid, sp["b"], sp["rho"], sp["m"], sp["sigma"])
 
         # dw/dT via finite difference between adjacent slices
-        if i == 0 and len(T_vals) > 1:
+        if i == 0 and n_T > 1:
             # Forward difference
-            sp_next = sorted_sp[np.isclose(sorted_sp["T"], T_vals[min(i + 1, n_T - 1)], atol=1e-6)]
+            sp_next = sorted_sp[np.isclose(sorted_sp["T"], T_vals[1], atol=1e-6)]
             if not sp_next.empty:
                 sp_n = sp_next.iloc[0]
                 w_next = svi_total_variance(k_grid, sp_n["a"], sp_n["b"], sp_n["rho"], sp_n["m"], sp_n["sigma"])
-                dw_dT = (w_next - w) / (T_vals[min(i + 1, n_T - 1)] - T)
+                dw_dT = (w_next - w) / (T_vals[1] - T)
             else:
-                dw_dT = w / T  # fallback: assume linear from origin
-        elif i == n_T - 1 and len(T_vals) > 1:
+                dw_dT = w / T
+        elif i == n_T - 1 and n_T > 1:
             # Backward difference
-            sp_prev = sorted_sp[np.isclose(sorted_sp["T"], T_vals[max(i - 1, 0)], atol=1e-6)]
+            sp_prev = sorted_sp[np.isclose(sorted_sp["T"], T_vals[i - 1], atol=1e-6)]
             if not sp_prev.empty:
                 sp_p = sp_prev.iloc[0]
                 w_prev = svi_total_variance(k_grid, sp_p["a"], sp_p["b"], sp_p["rho"], sp_p["m"], sp_p["sigma"])
-                dw_dT = (w - w_prev) / (T - T_vals[max(i - 1, 0)])
+                dw_dT = (w - w_prev) / (T - T_vals[i - 1])
             else:
                 dw_dT = w / T
-        elif len(T_vals) > 2:
+        elif n_T > 2:
             # Central difference
             sp_prev = sorted_sp[np.isclose(sorted_sp["T"], T_vals[i - 1], atol=1e-6)]
             sp_next = sorted_sp[np.isclose(sorted_sp["T"], T_vals[i + 1], atol=1e-6)]
@@ -107,22 +117,32 @@ def _compute_local_vol(
             + w_double_prime / 2.0
         )
 
-        # Local variance = dw/dT / denominator
-        # Use a meaningful threshold: denominator near zero signals the
-        # Durrleman condition is barely satisfied, making local vol
-        # numerically unreliable at that point.
+        # Reject points where the denominator is small — these produce
+        # unreliable local vol due to near-zero Durrleman values.
         with np.errstate(divide="ignore", invalid="ignore"):
             local_var = np.where(
-                denominator > 0.01,
+                denominator > 0.05,
                 dw_dT / denominator,
                 np.nan,
             )
 
         local_vol_raw = np.sqrt(np.maximum(local_var, 0.0))
-        # Cap at 150% — anything beyond is numerical noise for equity
-        # local vol surfaces (typical range: 10-80%).
-        local_vol_raw = np.where(local_vol_raw > 1.5, np.nan, local_vol_raw)
+        # Cap at 80% — equity local vol beyond this is numerical noise.
+        local_vol_raw = np.where(local_vol_raw > 0.80, np.nan, local_vol_raw)
         local_vol[i, :] = local_vol_raw
+
+    # Smooth the surface to remove residual jaggedness from finite
+    # differences across unevenly spaced expiry slices.
+    # gaussian_filter treats NaNs as 0, so we use a normalized-convolution
+    # approach: smooth numerator and weight mask separately, then divide.
+    valid = np.isfinite(local_vol)
+    filled = np.where(valid, local_vol, 0.0)
+    weights = valid.astype(float)
+    sigma = (1.0, 2.0)  # light smoothing: (T-direction, k-direction)
+    smoothed_num = gaussian_filter(filled, sigma=sigma)
+    smoothed_den = gaussian_filter(weights, sigma=sigma)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        local_vol = np.where(smoothed_den > 0.3, smoothed_num / smoothed_den, np.nan)
 
     # Convert k_grid to strikes for each T
     F_vals = spot * np.exp((risk_free - div_yield) * T_vals)
@@ -149,7 +169,7 @@ def render_local_vol(
     sorted_sp = slice_params.sort_values("T")
     T_vals = sorted_sp["T"].values
 
-    k_grid = np.linspace(-0.20, 0.20, 100)
+    k_grid = np.linspace(-0.15, 0.15, 80)
 
     strike_grid, T_grid, local_vol = _compute_local_vol(
         k_grid, T_vals, slice_params, spot, risk_free, div_yield,
@@ -180,6 +200,7 @@ def render_local_vol(
                 xaxis_title="Strike",
                 yaxis_title="Days to Expiry",
                 zaxis_title="Local Volatility",
+                zaxis=dict(tickformat=".0%", range=[0, 0.80]),
                 camera=dict(eye=dict(x=1.5, y=-1.8, z=0.8)),
             ),
             margin=dict(l=0, r=0, t=30, b=0),
