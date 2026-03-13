@@ -130,7 +130,20 @@ def fetch_raw_chain(symbol: str = "SPY") -> tuple[yf.Ticker, pd.DataFrame, float
     spot : float
     """
     ticker = yf.Ticker(symbol)
-    spot = float(ticker.fast_info["lastPrice"])
+
+    # fast_info["lastPrice"] can be None for index tickers (e.g. SPX, ^SPX).
+    raw_price = ticker.fast_info.get("lastPrice")
+    if raw_price is None:
+        # Fallback: use the last close from recent price history.
+        hist = ticker.history(period="5d")
+        if hist.empty or "Close" not in hist.columns:
+            raise RuntimeError(
+                f"Cannot determine spot price for {symbol}. "
+                "yfinance returned no price data — verify the ticker symbol."
+            )
+        raw_price = hist["Close"].dropna().iloc[-1]
+
+    spot = float(raw_price)
     logger.info("Spot price for %s: %.2f", symbol, spot)
 
     expiries = ticker.options  # list of expiry date strings

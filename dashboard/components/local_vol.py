@@ -115,7 +115,12 @@ def _compute_local_vol(
                 np.nan,
             )
 
-        local_vol[i, :] = np.sqrt(np.maximum(local_var, 0.0))
+        local_vol_raw = np.sqrt(np.maximum(local_var, 0.0))
+        # Clamp extreme values caused by numerical instability near
+        # boundaries (near-zero denominators, sparse finite differences).
+        # Cap at 300% — anything beyond is not economically meaningful.
+        local_vol_raw = np.where(local_vol_raw > 3.0, np.nan, local_vol_raw)
+        local_vol[i, :] = local_vol_raw
 
     # Convert k_grid to strikes for each T
     F_vals = spot * np.exp((risk_free - div_yield) * T_vals)
