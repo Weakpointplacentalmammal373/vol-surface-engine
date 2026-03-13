@@ -118,6 +118,19 @@ def estimate_dividend_yield(ticker: yf.Ticker, spot: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Ticker normalisation
+# ---------------------------------------------------------------------------
+# Common index symbols that yfinance expects with a caret prefix.
+_TICKER_ALIASES: dict[str, str] = {
+    "SPX": "^SPX",
+    "NDX": "^NDX",
+    "RUT": "^RUT",
+    "DJX": "^DJI",
+    "VIX": "^VIX",
+}
+
+
+# ---------------------------------------------------------------------------
 # Options chain fetching
 # ---------------------------------------------------------------------------
 def fetch_raw_chain(symbol: str = "SPY") -> tuple[yf.Ticker, pd.DataFrame, float]:
@@ -129,6 +142,7 @@ def fetch_raw_chain(symbol: str = "SPY") -> tuple[yf.Ticker, pd.DataFrame, float
     raw_chain : pd.DataFrame  (concatenation of all expiry chains)
     spot : float
     """
+    symbol = _TICKER_ALIASES.get(symbol.upper(), symbol)
     ticker = yf.Ticker(symbol)
 
     # fast_info["lastPrice"] can be None for index tickers (e.g. SPX, ^SPX).
