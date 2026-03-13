@@ -7,6 +7,7 @@ blue-white-red colour scale.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -29,6 +30,19 @@ def render_residual_heatmap(
 
     if df.empty:
         st.warning("No residuals to display.")
+        return
+
+    # Filter out outlier IVs and residuals that distort the heatmap.
+    df = df[(df["iv"] > 0.01) & (df["iv"] < 2.0)]
+    df = df[df["residual"].abs() < 0.5]
+
+    # Focus strikes around spot to avoid sparse deep-OTM regions.
+    strike_lo = spot * np.exp(-0.25)
+    strike_hi = spot * np.exp(0.25)
+    df = df[(df["strike"] >= strike_lo) & (df["strike"] <= strike_hi)]
+
+    if df.empty:
+        st.warning("No residuals to display after filtering.")
         return
 
     # Compute significance threshold (2 sigma of residuals)

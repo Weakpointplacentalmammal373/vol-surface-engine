@@ -32,11 +32,12 @@ def _build_surface_grid(
     strikes_grid, T_grid : 2-D meshgrid arrays
     market_iv_grid, fitted_iv_grid : 2-D arrays (NaN where no data)
     """
-    strikes = np.linspace(
-        chain["strike"].min(),
-        chain["strike"].max(),
-        n_strike,
-    )
+    # Focus on strikes within a reasonable range of spot to avoid sparse,
+    # blown-out grids from deep OTM options in live data.
+    strike_lo = spot * np.exp(-0.25)  # ~22% below spot
+    strike_hi = spot * np.exp(0.25)   # ~28% above spot
+
+    strikes = np.linspace(strike_lo, strike_hi, n_strike)
     T_vals = np.sort(slice_params["T"].unique())
 
     strikes_grid = np.tile(strikes, (len(T_vals), 1))
@@ -54,15 +55,22 @@ def _build_surface_grid(
         F = spot * np.exp((risk_free - div_yield) * T)
         k = np.log(strikes / F)
         w = svi_total_variance(k, sp["a"], sp["b"], sp["rho"], sp["m"], sp["sigma"])
-        fitted_iv_grid[i, :] = np.sqrt(np.maximum(w, 0.0) / T)
+        iv_fitted = np.sqrt(np.maximum(w, 0.0) / T)
+        # Cap unrealistic fitted IVs from SVI extrapolation at wings.
+        iv_fitted = np.where((iv_fitted > 0) & (iv_fitted < 2.0), iv_fitted, np.nan)
+        fitted_iv_grid[i, :] = iv_fitted
 
         # Scatter market points onto nearest grid columns
         slice_data = chain[np.isclose(chain["T"], T, atol=1e-6)]
         for _, row in slice_data.iterrows():
-            if np.isnan(row["iv"]):
+            iv = row["iv"]
+            if np.isnan(iv) or iv > 2.0 or iv < 0.01:
                 continue
-            j = int(np.argmin(np.abs(strikes - row["strike"])))
-            market_iv_grid[i, j] = row["iv"]
+            K = row["strike"]
+            if K < strike_lo or K > strike_hi:
+                continue
+            j = int(np.argmin(np.abs(strikes - K)))
+            market_iv_grid[i, j] = iv
 
     return strikes_grid, T_grid, market_iv_grid, fitted_iv_grid
 
@@ -94,14 +102,17 @@ def render_surface_3d(
         z = fit_iv
         colorscale = "Viridis"
         cbar_title = "IV"
+        tickfmt = ".1%"
     elif view_mode == "Market IV":
         z = mkt_iv
         colorscale = "Viridis"
         cbar_title = "IV"
+        tickfmt = ".1%"
     else:
         z = residuals
         colorscale = "RdBu_r"
         cbar_title = "Residual"
+        tickfmt = ".4f"
 
     fig = go.Figure(
         data=[
@@ -110,7 +121,7 @@ def render_surface_3d(
                 y=T_grid * 365.25,  # show in days
                 z=z,
                 colorscale=colorscale,
-                colorbar=dict(title=cbar_title, tickformat=".3f"),
+                colorbar=dict(title=cbar_title, tickformat=tickfmt),
                 hovertemplate=(
                     "Strike: %{x:.1f}<br>"
                     "DTE: %{y:.0f} days<br>"
@@ -120,11 +131,25 @@ def render_surface_3d(
         ]
     )
 
+    # Auto-scale z-axis from data to avoid outlier-driven scaling.
+    valid = z[np.isfinite(z)]
+    if len(valid) > 0:
+        z_lo = float(np.percentile(valid, 2))
+        z_hi = float(np.percentile(valid, 98)) * 1.1
+        if "Residual" in view_mode:
+            z_bound = max(abs(z_lo), abs(z_hi))
+            z_range = [-z_bound, z_bound]
+        else:
+            z_range = [max(z_lo * 0.8, 0), z_hi]
+    else:
+        z_range = None
+
     fig.update_layout(
         scene=dict(
             xaxis_title="Strike",
             yaxis_title="Days to Expiry",
             zaxis_title="Implied Volatility" if "Residual" not in view_mode else "Residual",
+            zaxis=dict(range=z_range) if z_range else {},
             camera=dict(eye=dict(x=1.5, y=-1.8, z=0.8)),
         ),
         margin=dict(l=0, r=0, t=30, b=0),
