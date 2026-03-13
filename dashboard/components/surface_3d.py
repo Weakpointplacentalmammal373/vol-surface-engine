@@ -32,10 +32,10 @@ def _build_surface_grid(
     strikes_grid, T_grid : 2-D meshgrid arrays
     market_iv_grid, fitted_iv_grid : 2-D arrays (NaN where no data)
     """
-    # Focus on strikes within a reasonable range of spot to avoid sparse,
-    # blown-out grids from deep OTM options in live data.
-    strike_lo = spot * np.exp(-0.25)  # ~22% below spot
-    strike_hi = spot * np.exp(0.25)   # ~28% above spot
+    # Focus on strikes near ATM. The SVI fit is only reliable within a
+    # moderate moneyness range; beyond that, wing extrapolation explodes.
+    strike_lo = spot * np.exp(-0.15)  # ~14% below spot
+    strike_hi = spot * np.exp(0.15)   # ~16% above spot
 
     strikes = np.linspace(strike_lo, strike_hi, n_strike)
     T_vals = np.sort(slice_params["T"].unique())
@@ -57,14 +57,16 @@ def _build_surface_grid(
         w = svi_total_variance(k, sp["a"], sp["b"], sp["rho"], sp["m"], sp["sigma"])
         iv_fitted = np.sqrt(np.maximum(w, 0.0) / T)
         # Cap unrealistic fitted IVs from SVI extrapolation at wings.
-        iv_fitted = np.where((iv_fitted > 0) & (iv_fitted < 2.0), iv_fitted, np.nan)
+        # For equities, IV above 80% at ±15% moneyness is almost certainly
+        # extrapolation noise rather than genuine market signal.
+        iv_fitted = np.where((iv_fitted > 0.005) & (iv_fitted < 0.80), iv_fitted, np.nan)
         fitted_iv_grid[i, :] = iv_fitted
 
         # Scatter market points onto nearest grid columns
         slice_data = chain[np.isclose(chain["T"], T, atol=1e-6)]
         for _, row in slice_data.iterrows():
             iv = row["iv"]
-            if np.isnan(iv) or iv > 2.0 or iv < 0.01:
+            if np.isnan(iv) or iv > 0.80 or iv < 0.01:
                 continue
             K = row["strike"]
             if K < strike_lo or K > strike_hi:
@@ -102,12 +104,12 @@ def render_surface_3d(
         z = fit_iv
         colorscale = "Viridis"
         cbar_title = "IV"
-        tickfmt = ".1%"
+        tickfmt = ".2%"
     elif view_mode == "Market IV":
         z = mkt_iv
         colorscale = "Viridis"
         cbar_title = "IV"
-        tickfmt = ".1%"
+        tickfmt = ".2%"
     else:
         z = residuals
         colorscale = "RdBu_r"
@@ -149,7 +151,10 @@ def render_surface_3d(
             xaxis_title="Strike",
             yaxis_title="Days to Expiry",
             zaxis_title="Implied Volatility" if "Residual" not in view_mode else "Residual",
-            zaxis=dict(range=z_range) if z_range else {},
+            zaxis=dict(
+                range=z_range,
+                tickformat=".0%" if "Residual" not in view_mode else ".3f",
+            ) if z_range else {},
             camera=dict(eye=dict(x=1.5, y=-1.8, z=0.8)),
         ),
         margin=dict(l=0, r=0, t=30, b=0),

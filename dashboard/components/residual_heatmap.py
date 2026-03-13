@@ -33,12 +33,12 @@ def render_residual_heatmap(
         return
 
     # Filter out outlier IVs and residuals that distort the heatmap.
-    df = df[(df["iv"] > 0.01) & (df["iv"] < 2.0)]
-    df = df[df["residual"].abs() < 0.5]
+    df = df[(df["iv"] > 0.01) & (df["iv"] < 0.80)]
+    df = df[df["residual"].abs() < 0.10]
 
     # Focus strikes around spot to avoid sparse deep-OTM regions.
-    strike_lo = spot * np.exp(-0.25)
-    strike_hi = spot * np.exp(0.25)
+    strike_lo = spot * np.exp(-0.15)
+    strike_hi = spot * np.exp(0.15)
     df = df[(df["strike"] >= strike_lo) & (df["strike"] <= strike_hi)]
 
     if df.empty:
